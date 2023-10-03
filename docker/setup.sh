@@ -345,6 +345,7 @@ function cf_docker_create {
     local container="$(cf_container_exists $name)"
 
 	local -a volumes=("-v $(pwd)/download-aosp.sh:/home/vsoc-01/download-aosp.sh:ro")
+	volumes+=("-v $(pwd)/launch_cvd_bruce.sh:/home/vsoc-01/launch_cvd_bruce.sh:rw")
     if [[ -z "${container}" ]]; then
 	    echo "Container ${name} does not exist.";
 
@@ -358,23 +359,35 @@ function cf_docker_create {
 		    local home="$(mktemp -d)"
 		    echo "Setting up Cuttlefish host image from ${cuttlefish} in ${home}."
 		    tar xz -C "${home}" -f "${cuttlefish}"
+		    volumes+=("-v ${home}:/home/vsoc-01:rw")
+	    else
+		if [[ -d "${cuttlefish}" ]]; then
+		    #local home="$(mktemp -d)"
+		    #cp -rf ${cuttlefish}/* ${home}
+		    #echo "Setting up Cuttlefish host image from ${cuttlefish} in ${home}."
+		    #local home=${cuttlefish}
+		    echo "Setting up Cuttlefish host image (volume) from ${cuttlefish} to home directory."
+		    volumes+=("-v ${cuttlefish}:/home/vsoc-01:rw")
+		fi
 	    fi
 	    if [[ -d "${android}" ]]; then
-		    echo "Setting up Android images from ${android} in ${home}."
-		    if [[ $(compgen -G "${android}"/*.img) != "${android}/*.img" ]]; then
-				for f in "${android}"/*.img; do
-					volumes+=("-v ${f}:/home/vsoc-01/$(basename ${f}):rw")
-				done
-		    else
-			    echo "WARNING: No Android images in ${android}."
-		    fi
-            if [ -f "${android}/bootloader" ]; then
-                volumes+=("-v ${android}/bootloader:/home/vsoc-01/bootloader:rw")
-            fi
+		    echo "Setting up Android images from ${android} to /home/vsoc-01/aosp."
+		    volumes+=("-v ${android}:/home/vsoc-01/aosp:rw")
+		    #echo "Setting up Android images from ${android} in ${home}."
+		    #if [[ $(compgen -G "${android}"/*.img) != "${android}/*.img" ]]; then
+				#for f in "${android}"/*.img; do
+					#volumes+=("-v ${f}:/home/vsoc-01/$(basename ${f}):rw")
+				#done
+		    #else
+			    #echo "WARNING: No Android images in ${android}."
+		    #fi
+            	#if [ -f "${android}/bootloader" ]; then
+                	#volumes+=("-v ${android}/bootloader:/home/vsoc-01/bootloader:rw")
+            	#fi
 	    fi
-	    if [[ -f "${cuttlefish}" || -d "${android}" ]]; then
-		    volumes+=("-v ${home}:/home/vsoc-01:rw")
-	    fi
+	    #if [[ -f "${cuttlefish}" || -d "${cuttlefish}" || -d "${android}" || -n "${cuttlefish}" ]]; then
+		    #volumes+=("-v ${home}:/home/vsoc-01:rw")
+	    #fi
 
         if [[ $share_dir == "true" ]]; then
             # mount host_dir to guest_dir
@@ -472,12 +485,13 @@ function cf_docker_rm {
         local ip_addr_var_name="ip_${name}"
         unset ${ip_addr_var_name}
 
-		if [ -n "$(docker ps -a -f name=${name})" ]; then
+		if [ -n "$(docker ps -q -a -f name=${name})" ]; then
 			homedir=$(cf_gethome_${name})
 			echo "Deleting container ${name}."
 			docker rm -f ${name}
 			echo "Cleaning up homedir ${homedir}."
-			rm -rf ${homedir}
+			# don't delete cuttlefish home because want oringinal source for next time
+			# rm -rf ${homedir}
 			echo "Closing socat if any"
 			$(__gen_unpublish_func_name ${name})
 			unset $(__gen_unpublish_func_name ${name})
@@ -551,7 +565,7 @@ EOF
 
 read -r -d '' start_func <<EOF
 function $(__gen_start_func_name ${name}) {
-  $(__gen_login_func_name ${name}) ./bin/launch_cvd "${vcid_opt}" "\$@"
+  $(__gen_login_func_name ${name}) ./launch_cvd_bruce.sh "${vcid_opt}" "\$@"
 }
 EOF
 
@@ -673,7 +687,7 @@ function cf_clean_autogens() {
 cf_clean_autogens
 unset -f cf_clean_autogens
 
-for cf in $(docker ps -a --filter="ancestor=cuttlefish" --format "table {{.Names}}" | tail -n+2); do
+for cf in $(docker ps -q -a --filter="ancestor=cuttlefish" --format "table {{.Names}}" | tail -n+2); do
 	__gen_funcs "${cf}"
 	if [ -z "$cf_script" ]; then
 		help_on_container "${cf}"
